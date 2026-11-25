@@ -1,0 +1,5 @@
+# The web page needs nothing installed: Python runs in the browser (Pyodide).
+# For desktop.py and the tests (also install the Tesseract program, see desktop.py):
+numpy
+Pillow
+pytesseract

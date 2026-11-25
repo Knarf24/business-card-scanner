@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Business Card Scanner</title>
+  <meta name="description" content="Snap a business card and get a contact you can save to your phone (vCard) or a spreadsheet (CSV). Written in Python, running in your browser. Nothing is uploaded.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📇</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>📇 Business Card Scanner</h1>
+    <p class="lead">After a meeting or an expo you come home with a pile of business cards, and typing each one into
+      your phone takes ages, so most get lost in a drawer. Here you <b>snap or upload a card</b>, the app <b>reads it</b>
+      and fills in name, job, company, phone numbers, email, website and address. Check it, then
+      <b>save it straight to your phone's contacts</b> or download all your cards as a spreadsheet.</p>
+    <p class="py">🐍 The card reading logic is Python running right here in your browser with Pyodide.
+      🔒 Your cards never leave your device.</p>
+  </header>
+
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    <div>
+      <b id="loadText">Starting Python…</b>
+      <div class="small">First visit downloads about 20 MB (Python and the text reader). Later visits are faster.</div>
+    </div>
+  </div>
+
+  <main id="app" class="app">
+    <section class="card scan">
+      <h3>1. Scan a card</h3>
+      <div id="drop" class="drop">
+        <canvas id="preview" width="700" height="400" aria-label="The card picture"></canvas>
+        <div id="dropHint" class="drop-hint">
+          <div class="big">📇</div>
+          <div><b>Drop a card photo here</b><br><span class="small">or use the buttons below</span></div>
+        </div>
+        <div id="ocrBar" class="ocrbar" hidden><div id="ocrFill"></div><span id="ocrText">Reading…</span></div>
+      </div>
+      <div class="row btns">
+        <label class="btn primary" id="cameraBtn">📷 Take a photo
+          <input id="camera" type="file" accept="image/*" capture="environment" hidden disabled></label>
+        <label class="btn" id="uploadBtn">🖼️ Upload a picture
+          <input id="upload" type="file" accept="image/*" hidden disabled></label>
+        <button id="rotate" class="btn" type="button" disabled title="Turn the picture a quarter turn">⟳ Turn</button>
+        <button id="rescan" class="btn" type="button" disabled>↻ Read again</button>
+      </div>
+      <label class="small opt"><input id="cleanOn" type="checkbox" checked> Clean up the photo first (Python: grey,
+        contrast, dark cards turned light, shadows evened out, card cut out)</label>
+      <label class="small opt"><input id="showClean" type="checkbox"> Show the cleaned-up picture</label>
+      <div class="samples">
+        <span class="small">No card handy? Try a sample:</span>
+        <div class="sample-row">
+          <button class="sample" data-src="samples/card-classic.png" disabled><img src="samples/card-classic.png" alt="Sample card: Thandi Nkosi, Ubuntu Build Solutions"></button>
+          <button class="sample" data-src="samples/card-dark.png" disabled><img src="samples/card-dark.png" alt="Sample dark card: James Okafor, Kora Studio"></button>
+          <button class="sample" data-src="samples/card-photo.jpg" disabled><img src="samples/card-photo.jpg" alt="Sample phone photo of a card: Lerato van der Merwe, Fynbos Accounting"></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card check">
+      <h3>2. Check and save</h3>
+      <p id="checkHint" class="small">Scan a card and the details appear here. Fix anything the reader got wrong.</p>
+      <form id="form" class="form" autocomplete="off"></form>
+      <div class="row btns">
+        <button id="save" class="btn primary" type="button" disabled>💾 Save to my list</button>
+        <button id="saveVcf" class="btn" type="button" disabled title="Opens in your phone's Contacts app">📱 Add to phone (.vcf)</button>
+        <button id="clearForm" class="btn ghost" type="button" disabled>Clear</button>
+      </div>
+      <div id="saveMsg" class="small msg" aria-live="polite"></div>
+      <details id="rawBox" class="raw">
+        <summary class="small">Text read from the card</summary>
+        <pre id="raw"></pre>
+      </details>
+    </section>
+  </main>
+
+  <section class="card wide">
+    <div class="list-top">
+      <h3>3. My contacts <span id="count" class="count">0</span></h3>
+      <div class="row">
+        <input id="search" type="search" placeholder="Search…" aria-label="Search contacts">
+        <button id="allVcf" class="btn" type="button" disabled>📇 All as vCard (.vcf)</button>
+        <button id="allCsv" class="btn" type="button" disabled>📊 All as spreadsheet (.csv)</button>
+        <button id="clearAll" class="btn ghost danger" type="button" disabled>Delete all</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="table">
+        <thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th>Scanned</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p id="empty" class="small empty">Saved contacts appear here. They are kept in this browser only.</p>
+    </div>
+  </section>
+
+  <section class="card wide how">
+    <h3>How it works</h3>
+    <ol>
+      <li><b>Clean up the photo</b> (GeeksforGeeks <i>Text Detection and Extraction using OpenCV and OCR</i>):
+        Python with NumPy turns the picture grey using the colour with the most contrast, flips dark cards so text
+        is dark on light, evens out shadows and glare, and cuts the card out of the table around it.</li>
+      <li><b>Read the text</b> (GeeksforGeeks <i>Visiting Card Scanner GUI</i>): the Tesseract text reader
+        (Tesseract.js, running in your browser) reads each line and how big it is.</li>
+      <li><b>Find the details</b> (GeeksforGeeks <i>Email Id Extractor</i>): Python finds emails, websites and phone
+        numbers with patterns, sorts phones into mobile, office and fax from labels like "Cell" or "Fax" (or the
+        number itself), picks the address lines, the job title and company from keywords, and the name from the
+        biggest "First Last" line, checked against the email address.</li>
+      <li><b>Save it:</b> Python writes a vCard (opens in the Contacts app on iPhone and Android, and in Outlook
+        and Gmail) or a CSV spreadsheet for Excel and Google Sheets. It warns you if the person is already saved.</li>
+    </ol>
+    <p class="small"><b>Tips:</b> take the photo straight on, in good light, with the card filling most of the picture.
+      If the text is sideways, press <i>Turn</i>. English cards read best.</p>
+    <p class="small">🔒 <b>Privacy:</b> everything happens on your device. Pictures and contacts are never uploaded;
+      saved contacts stay in this browser until you delete them.</p>
+    <p class="small">Source code: <a href="https://github.com/Knarf24/business-card-scanner">github.com/Knarf24/business-card-scanner</a></p>
+  </section>
+
+  <script src="pyodide/pyodide.js"></script>
+  <script src="tesseract/tesseract.min.js"></script>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
