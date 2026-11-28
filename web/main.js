@@ -12,41 +12,54 @@ let editing = -1;         // index of the saved contact being edited, or -1 for 
 let contacts = loadContacts();
 
 // ---------- start-up ----------
+// The page is usable right away: Python and the text reader start side by side in the background, and a
+// picture chosen before they are ready is read as soon as they are.
+let ready = null;
+async function startPython() {
+  const code = fetch("card.py").then((r) => { if (!r.ok) throw new Error("card.py missing"); return r.text(); });
+  py = await loadPyodideFast();
+  await py.loadPackage("numpy");
+  py.FS.writeFile("/home/pyodide/card.py", await code);
+  py.runPython("import card");
+  cardPy = py.pyimport("card");
+  fields = JSON.parse(cardPy.fields_json());
+  buildForm();
+}
+
+async function startReader() {
+  ocr = await Tesseract.createWorker("eng", 1, {
+    workerPath: new URL("tesseract/worker.min.js", location.href).href,
+    corePath: new URL("tesseract/core/", location.href).href,
+    langPath: new URL("tesseract/lang/", location.href).href,
+    workerBlobURL: false,
+    logger: (m) => progress(m),
+  });
+  // Page mode 3 = find the text blocks on the card by itself (the default, 6, expects one block and drops big names).
+  await ocr.setParameters({ tessedit_pageseg_mode: "3", preserve_interword_spaces: "1", user_defined_dpi: "300" });
+}
+
 async function start() {
+  ready = Promise.all([startPython(), startReader()]);
+  setScanEnabled(true);
+  document.documentElement.dataset.ui = "ready";
+  const sample = new URLSearchParams(location.search).get("sample");
+  if (sample) loadFrom(`samples/${sample}`);
   try {
-    py = await loadPyodide({ indexURL: new URL("pyodide/", location.href).href });
-    $("loadText").textContent = "Loading NumPy…";
-    await py.loadPackage("numpy");
-    $("loadText").textContent = "Loading the card reader…";
-    const code = await fetch("card.py").then((r) => { if (!r.ok) throw new Error("card.py missing"); return r.text(); });
-    py.FS.writeFile("/home/pyodide/card.py", code);
-    py.runPython("import card");
-    cardPy = py.pyimport("card");
-    fields = JSON.parse(cardPy.fields_json());
-    buildForm();
-    $("loadText").textContent = "Loading the text reader…";
-    ocr = await Tesseract.createWorker("eng", 1, {
-      workerPath: new URL("tesseract/worker.min.js", location.href).href,
-      corePath: new URL("tesseract/core/", location.href).href,
-      langPath: new URL("tesseract/lang/", location.href).href,
-      workerBlobURL: false,
-      logger: (m) => progress(m),
-    });
-    // Page mode 3 = find the text blocks on the card by itself (the default, 6, expects one block and drops big names).
-    await ocr.setParameters({ tessedit_pageseg_mode: "3", preserve_interword_spaces: "1", user_defined_dpi: "300" });
+    await ready;
     $("loading").hidden = true;
     document.querySelectorAll("button, input").forEach((b) => { b.disabled = false; });
-    $("rotate").disabled = $("rescan").disabled = true;
+    setScanEnabled(!busy);
     setFormEnabled(false);
     renderList();
-    const sample = new URLSearchParams(location.search).get("sample");
-    if (sample) loadFrom(`samples/${sample}`);
+    document.documentElement.dataset.py = "ready";
   } catch (e) {
     console.error(e);
     $("loading").classList.add("error");
     $("loadText").textContent = "Sorry, the app could not start: " + e.message;
     document.querySelector("#loading .spinner").style.display = "none";
   }
+  // Keeps Python saved on this device so the next visit starts without downloading it (see sw.js).
+  if ("serviceWorker" in navigator && isSecureContext) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
 // ---------- pictures ----------
@@ -132,8 +145,12 @@ async function scan() {
   try {
     $("ocrBar").hidden = false;
     $("ocrFill").style.width = "0%";
-    $("ocrText").textContent = "Cleaning up the photo (Python)…";
     showPreview();
+    if (!cardPy || !ocr) {
+      $("ocrText").textContent = "Starting Python and the text reader…";
+      await ready;
+    }
+    $("ocrText").textContent = "Cleaning up the photo (Python)…";
     await new Promise((r) => setTimeout(r, 30));
     cleaned = $("cleanOn").checked ? cleanPicture(source) : null;
     showPreview();
@@ -327,12 +344,12 @@ $("clearAll").addEventListener("click", () => {
 });
 
 const drop = $("drop");
-["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); if (!busy && cardPy) drop.classList.add("over"); }));
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); if (!busy) drop.classList.add("over"); }));
 ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, () => drop.classList.remove("over")));
-drop.addEventListener("drop", (e) => { e.preventDefault(); if (!busy && ocr) loadFile(e.dataTransfer.files[0]); });
+drop.addEventListener("drop", (e) => { e.preventDefault(); if (!busy) loadFile(e.dataTransfer.files[0]); });
 window.addEventListener("paste", (e) => {
   const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
-  if (item && ocr && !busy) loadFile(item.getAsFile());
+  if (item && !busy) loadFile(item.getAsFile());
 });
 
 renderList();
